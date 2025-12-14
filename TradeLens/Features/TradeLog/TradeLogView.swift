@@ -7,6 +7,8 @@
 
 import SwiftUI
 import CoreData
+import AppKit
+import Vision
 
 struct TradeLogView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -16,6 +18,8 @@ struct TradeLogView: View {
     private var trades: FetchedResults<Trade>
     
     @State private var showingNewTradeSheet = false
+    @State private var showingEditTradeSheet = false
+    @State private var tradeToEdit: Trade?
     @State private var selectedTradeID: Trade.ID?
     @State private var filterSymbol: String = ""
     @State private var filterStatus: String = "全部"
@@ -184,16 +188,53 @@ struct TradeLogView: View {
                         StatusBadge(status: trade.status ?? "")
                     }
                     .width(min: 80, ideal: 100)
+                    
+                    TableColumn("复盘状态") { trade in
+                        ReviewStatusBadge(hasReview: trade.review != nil)
+                    }
+                    .width(min: 90, ideal: 100)
                 }
                 .tableStyle(.inset)
+                .contextMenu {
+                    if let tradeID = selectedTradeID,
+                       let trade = filteredTrades.first(where: { $0.id == tradeID }) {
+                        Button {
+                            tradeToEdit = trade
+                        } label: {
+                            Label("编辑", systemImage: "pencil")
+                        }
+                        
+                        Button(role: .destructive) {
+                            deleteTrade(trade)
+                        } label: {
+                            Label("删除", systemImage: "trash")
+                        }
+                    } else {
+                        Text("请先选择一条交易记录")
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
         .sheet(isPresented: $showingNewTradeSheet) {
             NewTradeSheet()
                 .environment(\.managedObjectContext, viewContext)
         }
+        .sheet(item: $tradeToEdit) { trade in
+            EditTradeSheet(trade: trade)
+                .environment(\.managedObjectContext, viewContext)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .newTradeShortcut)) { _ in
             showingNewTradeSheet = true
+        }
+    }
+    
+    private func deleteTrade(_ trade: Trade) {
+        viewContext.delete(trade)
+        do {
+            try viewContext.save()
+        } catch {
+            print("删除交易失败: \(error)")
         }
     }
 }
@@ -238,6 +279,48 @@ struct StatusBadge: View {
     }
 }
 
+struct ReviewStatusBadge: View {
+    let hasReview: Bool
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: hasReview ? "checkmark.circle.fill" : "circle")
+                .font(.caption)
+            Text(hasReview ? "已复盘" : "未复盘")
+                .font(.caption)
+        }
+        .foregroundStyle(hasReview ? .blue : .secondary)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(hasReview ? Color.blue.opacity(0.1) : Color.clear)
+        .cornerRadius(4)
+    }
+}
+
+struct TradeCellView<Content: View>: View {
+    let trade: Trade
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+    @ViewBuilder let content: Content
+    
+    var body: some View {
+        content
+            .contextMenu {
+                Button {
+                    onEdit()
+                } label: {
+                    Label("编辑", systemImage: "pencil")
+                }
+                
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+            }
+    }
+}
+
 struct NewTradeSheet: View {
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.dismiss) private var dismiss
@@ -251,9 +334,48 @@ struct NewTradeSheet: View {
     @State private var leverage: Int = 10
     @State private var positionSize: Double = 0
     
+    @State private var isProcessingOCR = false
+    @State private var ocrError: String?
+    @State private var showingImagePicker = false
+    
     var body: some View {
         NavigationStack {
             Form {
+                Section("OCR 识别") {
+                    Button {
+                        recognizeFromClipboard()
+                    } label: {
+                        HStack {
+                            if isProcessingOCR {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                            } else {
+                                Image(systemName: "camera.viewfinder")
+                            }
+                            Text(isProcessingOCR ? "识别中..." : "从剪贴板识别交易流水")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .disabled(isProcessingOCR)
+                    
+                    Button {
+                        selectImageFile()
+                    } label: {
+                        HStack {
+                            Image(systemName: "photo")
+                            Text("选择图片文件")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .disabled(isProcessingOCR)
+                    
+                    if let error = ocrError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+                
                 Section("基本信息") {
                     TextField("交易对（例如 BTCUSDT）", text: $symbol)
                     Picker("方向", selection: $side) {
@@ -308,6 +430,89 @@ struct NewTradeSheet: View {
                 }
             }
             .frame(width: 500, height: 600)
+            .fileImporter(
+                isPresented: $showingImagePicker,
+                allowedContentTypes: [.image],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first,
+                       let image = NSImage(contentsOf: url) {
+                        recognizeFromImage(image)
+                    }
+                case .failure(let error):
+                    ocrError = "选择文件失败: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+    
+    private func recognizeFromClipboard() {
+        let pasteboard = NSPasteboard.general
+        guard let image = pasteboard.readObjects(forClasses: [NSImage.self], options: nil)?.first as? NSImage else {
+            ocrError = "剪贴板中没有图片"
+            return
+        }
+        
+        recognizeFromImage(image)
+    }
+    
+    private func selectImageFile() {
+        showingImagePicker = true
+    }
+    
+    private func recognizeFromImage(_ image: NSImage) {
+        isProcessingOCR = true
+        ocrError = nil
+        
+        Task {
+            do {
+                let text = try await recognizeText(from: image)
+                print("OCR 识别结果:\n\(text)")
+                
+                if let tradeData = parseTradeData(from: text) {
+                    await MainActor.run {
+                        fillForm(with: tradeData)
+                        isProcessingOCR = false
+                    }
+                } else {
+                    await MainActor.run {
+                        ocrError = "无法从图片中解析交易数据，请检查图片内容"
+                        isProcessingOCR = false
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    ocrError = "OCR 识别失败: \(error.localizedDescription)"
+                    isProcessingOCR = false
+                }
+            }
+        }
+    }
+    
+    private func fillForm(with data: TradeData) {
+        if !data.symbol.isEmpty {
+            symbol = data.symbol
+        }
+        side = data.side
+        if let openTime = data.openTime {
+            self.openTime = openTime
+        }
+        if let closeTime = data.closeTime {
+            self.closeTime = closeTime
+        }
+        if data.openPrice > 0 {
+            openPrice = data.openPrice
+        }
+        if data.closePrice > 0 {
+            closePrice = data.closePrice
+        }
+        if data.leverage > 0 {
+            leverage = data.leverage
+        }
+        if data.positionSize > 0 {
+            positionSize = data.positionSize
         }
     }
     
@@ -331,7 +536,11 @@ struct NewTradeSheet: View {
         
         let pnl = calculateProfit()
         trade.profitAmount = pnl
-        trade.profitRate = openPrice > 0 ? pnl / (openPrice * positionSize) : 0
+        
+        // 盈亏率 = 实际波动 * 杠杆倍数
+        // 实际波动 = (平仓价格 - 开仓价格) / 开仓价格 * 方向系数
+        let priceChangeRate = openPrice > 0 ? (closePrice - openPrice) / openPrice * (side == "long" ? 1.0 : -1.0) : 0
+        trade.profitRate = priceChangeRate * Double(leverage)
         
         if pnl > 0 {
             trade.status = "win"
@@ -349,6 +558,369 @@ struct NewTradeSheet: View {
         } catch {
             print("保存交易失败: \(error)")
         }
+    }
+}
+
+struct EditTradeSheet: View {
+    @ObservedObject var trade: Trade
+    @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.dismiss) private var dismiss
+    
+    @State private var symbol: String = ""
+    @State private var side: String = "long"
+    @State private var openTime: Date = Date()
+    @State private var closeTime: Date = Date()
+    @State private var openPrice: Double = 0
+    @State private var closePrice: Double = 0
+    @State private var leverage: Int = 10
+    @State private var positionSize: Double = 0
+    
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("基本信息") {
+                    TextField("交易对（例如 BTCUSDT）", text: $symbol)
+                    Picker("方向", selection: $side) {
+                        Text("做多").tag("long")
+                        Text("做空").tag("short")
+                    }
+                }
+                
+                Section("时间") {
+                    DatePicker("开仓时间", selection: $openTime)
+                    DatePicker("平仓时间", selection: $closeTime)
+                }
+                
+                Section("价格与仓位") {
+                    TextField("开仓价格", value: $openPrice, format: .number)
+                    TextField("平仓价格", value: $closePrice, format: .number)
+                    TextField("杠杆", value: $leverage, format: .number)
+                    TextField("仓位大小", value: $positionSize, format: .number)
+                }
+                
+                if openPrice > 0 && closePrice > 0 && positionSize > 0 {
+                    Section("计算结果") {
+                        let pnl = calculateProfit()
+                        let priceChangeRate = openPrice > 0 ? (closePrice - openPrice) / openPrice * (side == "long" ? 1.0 : -1.0) : 0
+                        let pnlRate = priceChangeRate * Double(leverage)
+                        
+                        HStack {
+                            Text("盈亏金额:")
+                            Spacer()
+                            Text(String(format: "%.2f USDT", pnl))
+                                .foregroundStyle(pnl >= 0 ? .green : .red)
+                        }
+                        HStack {
+                            Text("盈亏率:")
+                            Spacer()
+                            Text(String(format: "%.2f%%", pnlRate * 100))
+                                .foregroundStyle(pnlRate >= 0 ? .green : .red)
+                        }
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("编辑交易")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        save()
+                    }
+                    .disabled(symbol.isEmpty || openPrice <= 0 || closePrice <= 0 || positionSize <= 0)
+                }
+            }
+            .frame(width: 500, height: 600)
+            .onAppear {
+                loadTrade()
+            }
+        }
+    }
+    
+    private func loadTrade() {
+        symbol = trade.symbol ?? ""
+        side = trade.side ?? "long"
+        openTime = trade.openTime ?? Date()
+        closeTime = trade.closeTime ?? Date()
+        openPrice = trade.openPrice
+        closePrice = trade.closePrice
+        leverage = Int(trade.leverage)
+        positionSize = trade.positionSize
+    }
+    
+    private func calculateProfit() -> Double {
+        let priceDiff = closePrice - openPrice
+        let multiplier = side == "long" ? 1.0 : -1.0
+        return priceDiff * multiplier * positionSize
+    }
+    
+    private func save() {
+        trade.symbol = symbol.uppercased()
+        trade.side = side
+        trade.openTime = openTime
+        trade.closeTime = closeTime
+        trade.openPrice = openPrice
+        trade.closePrice = closePrice
+        trade.leverage = Int16(leverage)
+        trade.positionSize = positionSize
+        
+        let pnl = calculateProfit()
+        trade.profitAmount = pnl
+        
+        // 盈亏率 = 实际波动 * 杠杆倍数
+        let priceChangeRate = openPrice > 0 ? (closePrice - openPrice) / openPrice * (side == "long" ? 1.0 : -1.0) : 0
+        trade.profitRate = priceChangeRate * Double(leverage)
+        
+        if pnl > 0 {
+            trade.status = "win"
+        } else if pnl < 0 {
+            trade.status = "loss"
+        } else {
+            trade.status = "breakeven"
+        }
+        
+        do {
+            try viewContext.save()
+            dismiss()
+        } catch {
+            print("保存交易失败: \(error)")
+        }
+    }
+}
+
+// MARK: - OCR 辅助类型和函数
+
+struct TradeData {
+    var symbol: String = ""
+    var side: String = "long"
+    var openTime: Date?
+    var closeTime: Date?
+    var openPrice: Double = 0
+    var closePrice: Double = 0
+    var leverage: Int = 10
+    var positionSize: Double = 0
+    var profitAmount: Double = 0
+    var profitRate: Double = 0
+}
+
+enum OCRError: LocalizedError {
+    case invalidImage
+    case noTextFound
+    case parseFailed
+    
+    var errorDescription: String? {
+        switch self {
+        case .invalidImage: return "无效的图片"
+        case .noTextFound: return "图片中未识别到文本"
+        case .parseFailed: return "无法解析交易数据"
+        }
+    }
+}
+
+extension NewTradeSheet {
+    /// 从图片中识别文本
+    func recognizeText(from image: NSImage) async throws -> String {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            throw OCRError.invalidImage
+        }
+        
+        return try await withCheckedThrowingContinuation { continuation in
+            let request = VNRecognizeTextRequest { request, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                
+                guard let observations = request.results as? [VNRecognizedTextObservation] else {
+                    continuation.resume(throwing: OCRError.noTextFound)
+                    return
+                }
+                
+                let recognizedStrings = observations.compactMap { observation in
+                    observation.topCandidates(1).first?.string
+                }
+                
+                let fullText = recognizedStrings.joined(separator: "\n")
+                continuation.resume(returning: fullText)
+            }
+            
+            request.recognitionLanguages = ["zh-Hans", "en-US"]
+            request.recognitionLevel = .accurate
+            
+            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+            
+            do {
+                try handler.perform([request])
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
+    }
+    
+    /// 从 OCR 文本中解析交易数据
+    func parseTradeData(from text: String) -> TradeData? {
+        var tradeData = TradeData()
+        let fullText = text.replacingOccurrences(of: "\n", with: " ")
+        
+        // 解析交易对
+        if let symbol = extractSymbol(from: fullText) {
+            tradeData.symbol = symbol
+        }
+        
+        // 解析方向
+        if fullText.contains("做多") || fullText.contains("Long") || fullText.contains("long") {
+            tradeData.side = "long"
+        } else if fullText.contains("做空") || fullText.contains("Short") || fullText.contains("short") {
+            tradeData.side = "short"
+        }
+        
+        // 解析时间
+        tradeData.openTime = extractDate(from: fullText, keywords: ["开仓时间", "Open Time", "开仓"])
+        tradeData.closeTime = extractDate(from: fullText, keywords: ["平仓时间", "Close Time", "平仓", "Average Close"])
+        
+        // 解析价格
+        tradeData.openPrice = extractPrice(from: fullText, keywords: ["开仓价格", "Open Price", "开仓"]) ?? 0
+        tradeData.closePrice = extractPrice(from: fullText, keywords: ["平仓价格", "Close Price", "Average Close Price", "平仓"]) ?? 0
+        
+        // 解析其他字段
+        tradeData.leverage = extractLeverage(from: fullText) ?? 10
+        tradeData.positionSize = extractPositionSize(from: fullText) ?? 0
+        tradeData.profitAmount = extractProfitAmount(from: fullText) ?? 0
+        tradeData.profitRate = extractProfitRate(from: fullText) ?? 0
+        
+        guard !tradeData.symbol.isEmpty, tradeData.openPrice > 0, tradeData.closePrice > 0 else {
+            return nil
+        }
+        
+        return tradeData
+    }
+    
+    // MARK: - 辅助解析方法
+    
+    private func extractSymbol(from text: String) -> String? {
+        let patterns = [#"([A-Z0-9]+USDT)"#, #"([A-Z0-9]+USDT\s*永续)"#, #"([A-Z0-9]+USDT\s*Perpetual)"#]
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+               let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+               let range = Range(match.range(at: 1), in: text) {
+                return String(text[range]).replacingOccurrences(of: "永续", with: "")
+                    .replacingOccurrences(of: "Perpetual", with: "").trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return nil
+    }
+    
+    private func extractDate(from text: String, keywords: [String]) -> Date? {
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "zh_CN")
+        let formats = ["yyyy/MM/dd HH:mm:ss", "yyyy-MM-dd HH:mm:ss", "MM/dd/yyyy HH:mm:ss", "yyyy/MM/dd", "yyyy-MM-dd"]
+        
+        for keyword in keywords {
+            if let range = text.range(of: keyword, options: .caseInsensitive) {
+                let afterKeyword = String(text[range.upperBound...])
+                for format in formats {
+                    dateFormatter.dateFormat = format
+                    let trimmed = afterKeyword.trimmingCharacters(in: .whitespaces)
+                    if let date = dateFormatter.date(from: String(trimmed.prefix(19))) {
+                        return date
+                    }
+                }
+                let datePattern = #"(\d{4}[-/]\d{1,2}[-/]\d{1,2}[\s\d:]*)"#
+                if let regex = try? NSRegularExpression(pattern: datePattern),
+                   let match = regex.firstMatch(in: afterKeyword, range: NSRange(afterKeyword.startIndex..., in: afterKeyword)),
+                   let matchRange = Range(match.range, in: afterKeyword) {
+                    let dateString = String(afterKeyword[matchRange])
+                    for format in formats {
+                        dateFormatter.dateFormat = format
+                        if let date = dateFormatter.date(from: dateString) {
+                            return date
+                        }
+                    }
+                }
+            }
+        }
+        return nil
+    }
+    
+    private func extractPrice(from text: String, keywords: [String]) -> Double? {
+        for keyword in keywords {
+            if let range = text.range(of: keyword, options: .caseInsensitive) {
+                let afterKeyword = String(text[range.upperBound...])
+                let pricePattern = #"(\d+\.?\d*)\s*USDT"#
+                if let regex = try? NSRegularExpression(pattern: pricePattern),
+                   let match = regex.firstMatch(in: afterKeyword, range: NSRange(afterKeyword.startIndex..., in: afterKeyword)),
+                   let matchRange = Range(match.range(at: 1), in: afterKeyword) {
+                    return Double(String(afterKeyword[matchRange]))
+                }
+                let numberPattern = #"(\d+\.?\d{2,8})"#
+                if let regex = try? NSRegularExpression(pattern: numberPattern),
+                   let match = regex.firstMatch(in: afterKeyword, range: NSRange(afterKeyword.startIndex..., in: afterKeyword)),
+                   let matchRange = Range(match.range(at: 1), in: afterKeyword) {
+                    return Double(String(afterKeyword[matchRange]))
+                }
+            }
+        }
+        return nil
+    }
+    
+    private func extractLeverage(from text: String) -> Int? {
+        let patterns = [#"杠杆[：:]\s*(\d+)"#, #"Leverage[：:]\s*(\d+)"#, #"(\d+)x"#, #"(\d+)X"#]
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+               let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+               let range = Range(match.range(at: 1), in: text) {
+                return Int(String(text[range]))
+            }
+        }
+        return nil
+    }
+    
+    private func extractPositionSize(from text: String) -> Double? {
+        let patterns = [#"仓位[大小]*[：:]\s*(\d+\.?\d*)"#, #"Position[：:]\s*(\d+\.?\d*)"#, #"Closed Quantity[：:]\s*(\d+\.?\d*)"#, #"最大持仓[：:]\s*(\d+\.?\d*)"#]
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+               let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+               let range = Range(match.range(at: 1), in: text) {
+                return Double(String(text[range]))
+            }
+        }
+        return nil
+    }
+    
+    private func extractProfitAmount(from text: String) -> Double? {
+        let patterns = [#"盈亏[金额]*[：:]\s*([+-]?\d+\.?\d*)\s*USDT"#, #"Profit/Loss[：:]\s*([+-]?\d+\.?\d*)\s*USDT"#, #"([+-]?\d+\.?\d*)\s*USDT"#]
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
+                let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+                for match in matches {
+                    if let range = Range(match.range(at: 1), in: text) {
+                        if let value = Double(String(text[range])) {
+                            return value
+                        }
+                    }
+                }
+            }
+        }
+        return nil
+    }
+    
+    private func extractProfitRate(from text: String) -> Double? {
+        let patterns = [#"盈亏率[：:]\s*([+-]?\d+\.?\d*)%"#, #"Return Rate[：:]\s*([+-]?\d+\.?\d*)%"#, #"([+-]?\d+\.?\d*)%"#]
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
+                let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+                for match in matches {
+                    if let range = Range(match.range(at: 1), in: text) {
+                        if let value = Double(String(text[range])) {
+                            return value / 100.0
+                        }
+                    }
+                }
+            }
+        }
+        return nil
     }
 }
 

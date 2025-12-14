@@ -66,8 +66,8 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 
-                Link("帮助文档", destination: URL(string: "https://github.com/tradelens")!)
-                Link("反馈问题", destination: URL(string: "https://github.com/tradelens/issues")!)
+                Link("帮助文档", destination: URL(string: "https://github.com/lemondy/TradeLens")!)
+                Link("反馈问题", destination: URL(string: "https://github.com/lemondy/TradeLens/issues")!)
             }
         }
         .formStyle(.grouped)
