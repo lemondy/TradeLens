@@ -9,15 +9,35 @@ import SwiftUI
 
 struct SettingsView: View {
     @AppStorage("initialEquity") private var initialEquity: Double = 10000.0
+    @AppStorage("themeMode") private var themeModeString: String = ThemeMode.system.rawValue
     @State private var apiKey: String = ""
     @State private var showingAPIKeyInput = false
     @State private var tempAPIKey: String = ""
+    
+    private var themeModeBinding: Binding<ThemeMode> {
+        Binding(
+            get: {
+                ThemeMode(rawValue: themeModeString) ?? .system
+            },
+            set: { newValue in
+                themeModeString = newValue.rawValue
+            }
+        )
+    }
     
     var body: some View {
         Form {
             Section("账户设置") {
                 TextField("初始资金 (USDT)", value: $initialEquity, format: .number)
                     .help("用于计算资金曲线和回撤")
+            }
+            
+            Section("外观设置") {
+                Picker("主题模式", selection: themeModeBinding) {
+                    ForEach(ThemeMode.allCases, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
             }
             
             Section("AI 设置") {

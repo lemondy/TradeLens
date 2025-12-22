@@ -7,14 +7,48 @@
 
 import SwiftUI
 
+enum ThemeMode: String, CaseIterable {
+    case light = "light"
+    case dark = "dark"
+    case system = "system"
+    
+    var displayName: String {
+        switch self {
+        case .light:
+            return "白天"
+        case .dark:
+            return "夜间"
+        case .system:
+            return "跟随系统"
+        }
+    }
+    
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .light:
+            return .light
+        case .dark:
+            return .dark
+        case .system:
+            return nil
+        }
+    }
+}
+
 @main
 struct TradeLensApp: App {
     let persistenceController = PersistenceController.shared
+    @AppStorage("themeMode") private var themeModeString: String = ThemeMode.system.rawValue
+    
+    private var colorScheme: ColorScheme? {
+        ThemeMode(rawValue: themeModeString)?.colorScheme
+    }
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
+                .preferredColorScheme(colorScheme)
         }
         .commands {
             CommandMenu("交易") {
