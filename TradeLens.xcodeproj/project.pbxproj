@@ -21,6 +21,7 @@
 		AA0000000000000000000017 /* PromptBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000018 /* PromptBuilder.swift */; };
 		AA0000000000000000000019 /* SecurityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001A /* SecurityService.swift */; };
 		AA000000000000000000001B /* TradeLens.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001C /* TradeLens.xcdatamodeld */; };
+		AA000000000000000000003B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003C /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -40,6 +41,7 @@
 		AA000000000000000000001C /* TradeLens.xcdatamodeld */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = TradeLens.xcdatamodeld; sourceTree = "<group>"; };
 		AA000000000000000000001D /* TradeLens.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TradeLens.entitlements; sourceTree = "<group>"; };
 		AA000000000000000000001E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		AA000000000000000000003C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -64,6 +66,13 @@
 			path = TradeLens;
 			sourceTree = "<group>";
 		};
+		AA0000000000000000000021 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
 		AA0000000000000000000022 /* App */ = {
 			isa = PBXGroup;
 			children = (
@@ -84,6 +93,41 @@
 				AA000000000000000000002D /* Settings */,
 			);
 			path = Features;
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000024 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				AA000000000000000000002E /* AI */,
+				AA000000000000000000002F /* Security */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000025 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				AA000000000000000000001C /* TradeLens.xcdatamodeld */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000026 /* Persistence */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000006 /* PersistenceController.swift */,
+			);
+			path = Persistence;
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000027 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				AA000000000000000000001D /* TradeLens.entitlements */,
+				AA000000000000000000001E /* Info.plist */,
+				AA000000000000000000003C /* Assets.xcassets */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		AA0000000000000000000028 /* TradeLog */ = {
@@ -134,15 +178,6 @@
 			path = Settings;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000024 /* Services */ = {
-			isa = PBXGroup;
-			children = (
-				AA000000000000000000002E /* AI */,
-				AA000000000000000000002F /* Security */,
-			);
-			path = Services;
-			sourceTree = "<group>";
-		};
 		AA000000000000000000002E /* AI */ = {
 			isa = PBXGroup;
 			children = (
@@ -161,38 +196,6 @@
 			path = Security;
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000025 /* Models */ = {
-			isa = PBXGroup;
-			children = (
-				AA000000000000000000001C /* TradeLens.xcdatamodeld */,
-			);
-			path = Models;
-			sourceTree = "<group>";
-		};
-		AA0000000000000000000026 /* Persistence */ = {
-			isa = PBXGroup;
-			children = (
-				AA0000000000000000000006 /* PersistenceController.swift */,
-			);
-			path = Persistence;
-			sourceTree = "<group>";
-		};
-		AA0000000000000000000027 /* Resources */ = {
-			isa = PBXGroup;
-			children = (
-				AA000000000000000000001D /* TradeLens.entitlements */,
-				AA000000000000000000001E /* Info.plist */,
-			);
-			path = Resources;
-			sourceTree = "<group>";
-		};
-		AA0000000000000000000021 /* Products */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			name = Products;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -201,7 +204,6 @@
 			buildConfigurationList = AA0000000000000000000031 /* Build configuration list for PBXNativeTarget "TradeLens" */;
 			buildPhases = (
 				AA0000000000000000000032 /* Sources */,
-				AA0000000000000000000033 /* Frameworks */,
 				AA0000000000000000000034 /* Resources */,
 			);
 			buildRules = (
@@ -220,7 +222,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1500;
-				LastUpgradeCheck = 1500;
+				LastUpgradeCheck = 2610;
 			};
 			buildConfigurationList = AA0000000000000000000036 /* Build configuration list for PBXProject "TradeLens" */;
 			compatibilityVersion = "Xcode 14.0";
@@ -245,6 +247,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA000000000000000000003B /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -309,6 +312,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -333,6 +337,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -372,6 +377,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -388,6 +394,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 			};
@@ -401,8 +408,12 @@
 				CODE_SIGN_ENTITLEMENTS = TradeLens/Resources/TradeLens.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "";
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TradeLens/Resources/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -426,8 +437,12 @@
 				CODE_SIGN_ENTITLEMENTS = TradeLens/Resources/TradeLens.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "";
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TradeLens/Resources/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -446,15 +461,6 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		AA0000000000000000000036 /* Build configuration list for PBXProject "TradeLens" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				AA0000000000000000000037 /* Debug */,
-				AA0000000000000000000038 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		AA0000000000000000000031 /* Build configuration list for PBXNativeTarget "TradeLens" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -464,8 +470,16 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		AA0000000000000000000036 /* Build configuration list for PBXProject "TradeLens" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000000000000000000037 /* Debug */,
+				AA0000000000000000000038 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 	};
 	rootObject = AA0000000000000000000035 /* Project object */;
 }
-

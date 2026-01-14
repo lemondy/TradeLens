@@ -31,29 +31,50 @@ struct ReviewEditorRootView: View {
                         showingNewReviewSheet = true
                     } label: {
                         Image(systemName: "plus")
+                            .font(.system(size: 14, weight: .medium))
                     }
+                    .buttonStyle(.plain)
+                    .help("新建复盘")
                 }
-                .padding()
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(Color(NSColor.controlBackgroundColor))
                 
                 Divider()
                 
-                List(reviews, selection: $selectedReview) { review in
-                    ReviewRow(review: review)
-                        .tag(review)
+                if reviews.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "square.and.pencil")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 60)
+                        
+                        Text("暂无复盘")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                        
+                        Text("点击「+」创建第一个复盘")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(reviews, selection: $selectedReview) { review in
+                        ReviewRow(review: review)
+                            .tag(review)
+                    }
+                    .listStyle(.sidebar)
                 }
-                .listStyle(.sidebar)
             }
-            .frame(minWidth: 250, idealWidth: 300)
+            .frame(minWidth: 250, idealWidth: 300, maxWidth: 400)
             
             // 右侧：编辑器
             if let review = selectedReview {
                 ReviewEditorView(review: review)
             } else {
-                ContentUnavailableView(
-                    "选择或创建复盘",
-                    systemImage: "square.and.pencil",
-                    description: Text("从左侧列表选择一笔复盘，或点击「+」创建新的复盘")
-                )
+                EmptyStateView {
+                    showingNewReviewSheet = true
+                }
             }
         }
         .sheet(isPresented: $showingNewReviewSheet) {
@@ -63,37 +84,104 @@ struct ReviewEditorRootView: View {
     }
 }
 
+struct EmptyStateView: View {
+    let onCreateReview: () -> Void
+    
+    var body: some View {
+        VStack(spacing: 20) {
+            Spacer()
+            
+            VStack(spacing: 16) {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 64))
+                    .foregroundStyle(.secondary.opacity(0.6))
+                
+                VStack(spacing: 8) {
+                    Text("选择或创建复盘")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.primary)
+                    
+                    Text("从左侧列表选择一笔复盘，或点击「+」创建新的复盘")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                }
+                
+                Button {
+                    onCreateReview()
+                } label: {
+                    Label("创建新复盘", systemImage: "plus.circle.fill")
+                        .font(.headline)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .padding(.top, 8)
+            }
+            
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(NSColor.textBackgroundColor))
+    }
+}
+
 struct ReviewRow: View {
     @ObservedObject var review: Review
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let trade = review.trade {
-                Text(trade.symbol ?? "未知交易对")
-                    .font(.headline)
-                Text(trade.closeTime ?? Date(), style: .date)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("独立复盘")
-                    .font(.headline)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    if let trade = review.trade {
+                        Text(trade.symbol ?? "未知交易对")
+                            .font(.headline)
+                            .lineLimit(1)
+                        Text(trade.closeTime ?? Date(), style: .date)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("独立复盘")
+                            .font(.headline)
+                        if let createdAt = review.createdAt {
+                            Text(createdAt, style: .date)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                
+                Spacer()
+                
+                if let updatedAt = review.updatedAt {
+                    Text(updatedAt, style: .relative)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
             
             if let tags = review.tags, !tags.isEmpty {
-                HStack {
+                HStack(spacing: 4) {
                     ForEach(tags.prefix(3), id: \.self) { tag in
                         Text("#\(tag)")
                             .font(.caption2)
                             .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.blue.opacity(0.2))
-                            .foregroundStyle(.blue)
+                            .padding(.vertical, 3)
+                            .background(Color.accentColor.opacity(0.15))
+                            .foregroundStyle(Color.accentColor)
                             .cornerRadius(4)
+                    }
+                    if tags.count > 3 {
+                        Text("+\(tags.count - 3)")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                     }
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 4)
     }
 }
 
@@ -109,24 +197,34 @@ struct ReviewEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             // 工具栏
-            HStack {
+            HStack(spacing: 16) {
                 if let trade = review.trade {
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text(trade.symbol ?? "未知")
                             .font(.headline)
-                        Text("盈亏: \(String(format: "%.2f", trade.profitAmount)) USDT")
-                            .font(.caption)
-                            .foregroundStyle(trade.profitAmount >= 0 ? .green : .red)
+                        HStack(spacing: 8) {
+                            Text("盈亏:")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("\(String(format: "%.2f", trade.profitAmount)) USDT")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundStyle(trade.profitAmount >= 0 ? .green : .red)
+                        }
                     }
+                } else {
+                    Text("独立复盘")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
                 }
                 
                 Spacer()
                 
                 // 标签输入
-                HStack {
+                HStack(spacing: 8) {
                     TextField("添加标签", text: $newTag)
                         .textFieldStyle(.roundedBorder)
-                        .frame(width: 120)
+                        .frame(width: 140)
                         .onSubmit {
                             addTag()
                         }
@@ -134,47 +232,55 @@ struct ReviewEditorView: View {
                     Button {
                         addTag()
                     } label: {
-                        Image(systemName: "plus.circle")
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 18))
                     }
+                    .buttonStyle(.plain)
+                    .help("添加标签")
+                    .disabled(newTag.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
                 
                 Button {
                     save()
                 } label: {
-                    Label("保存", systemImage: "checkmark")
+                    Label("保存", systemImage: "checkmark.circle.fill")
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
             }
-            .padding()
-            
-            Divider()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color(NSColor.controlBackgroundColor))
             
             // 标签显示
             if !tags.isEmpty {
+                Divider()
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
+                    HStack(spacing: 8) {
                         ForEach(tags, id: \.self) { tag in
-                            HStack(spacing: 4) {
+                            HStack(spacing: 6) {
                                 Text("#\(tag)")
+                                    .font(.caption)
                                 Button {
                                     tags.removeAll { $0 == tag }
                                 } label: {
                                     Image(systemName: "xmark.circle.fill")
                                         .font(.caption2)
                                 }
+                                .buttonStyle(.plain)
+                                .help("删除标签")
                             }
-                            .font(.caption)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.blue.opacity(0.2))
-                            .foregroundStyle(.blue)
-                            .cornerRadius(6)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.accentColor.opacity(0.15))
+                            .foregroundStyle(Color.accentColor)
+                            .cornerRadius(8)
                         }
                     }
-                    .padding(.horizontal)
+                    .padding(.horizontal, 16)
                 }
-                .padding(.vertical, 8)
-                .background(Color(NSColor.controlBackgroundColor))
+                .padding(.vertical, 10)
+                .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
             }
             
             Divider()
@@ -182,25 +288,63 @@ struct ReviewEditorView: View {
             // Markdown 编辑器
             HSplitView {
                 // 编辑区
-                TextEditor(text: $content)
-                    .font(.system(size: 14, design: .monospaced))
-                    .focused($isEditorFocused)
-                    .padding()
-                    .frame(minWidth: 400)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack {
+                        Label("编辑", systemImage: "pencil")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                        Spacer()
+                    }
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.3))
+                    
+                    TextEditor(text: $content)
+                        .font(.system(size: 14, design: .monospaced))
+                        .focused($isEditorFocused)
+                        .padding(16)
+                        .frame(minWidth: 400)
+                }
                 
                 // 预览区
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(parseMarkdown(content))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack {
+                        Label("预览", systemImage: "eye")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                        Spacer()
                     }
-                    .padding()
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.3))
+                    
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            if content.isEmpty {
+                                VStack(spacing: 12) {
+                                    Image(systemName: "text.alignleft")
+                                        .font(.system(size: 32))
+                                        .foregroundStyle(.tertiary)
+                                    Text("开始输入内容...")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 100)
+                            } else {
+                                Text(parseMarkdown(content))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .padding(16)
+                    }
+                    .frame(minWidth: 400)
+                    .background(Color(NSColor.textBackgroundColor))
                 }
-                .frame(minWidth: 400)
-                .background(Color(NSColor.textBackgroundColor))
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             loadReview()
         }

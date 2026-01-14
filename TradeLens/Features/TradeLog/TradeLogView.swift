@@ -337,6 +337,8 @@ struct NewTradeSheet: View {
     @State private var isProcessingOCR = false
     @State private var ocrError: String?
     @State private var showingImagePicker = false
+    @State private var recognizedTrades: [TradeData] = []
+    @State private var showingBatchConfirm = false
     
     var body: some View {
         NavigationStack {
@@ -430,6 +432,19 @@ struct NewTradeSheet: View {
                 }
             }
             .frame(width: 500, height: 600)
+            .sheet(isPresented: $showingBatchConfirm) {
+                BatchTradeConfirmSheet(
+                    trades: recognizedTrades,
+                    onConfirm: { selectedTrades in
+                        saveBatchTrades(selectedTrades)
+                        showingBatchConfirm = false
+                    },
+                    onCancel: {
+                        showingBatchConfirm = false
+                    }
+                )
+                .environment(\.managedObjectContext, viewContext)
+            }
             .fileImporter(
                 isPresented: $showingImagePicker,
                 allowedContentTypes: [.image],
@@ -465,21 +480,33 @@ struct NewTradeSheet: View {
     private func recognizeFromImage(_ image: NSImage) {
         isProcessingOCR = true
         ocrError = nil
+        recognizedTrades = []
         
         Task {
             do {
                 let text = try await recognizeText(from: image)
                 print("OCR 识别结果:\n\(text)")
                 
-                if let tradeData = parseTradeData(from: text) {
-                    await MainActor.run {
-                        fillForm(with: tradeData)
-                        isProcessingOCR = false
-                    }
-                } else {
-                    await MainActor.run {
-                        ocrError = "无法从图片中解析交易数据，请检查图片内容"
-                        isProcessingOCR = false
+                // 尝试解析多笔交易
+                let trades = parseMultipleTrades(from: text)
+                
+                await MainActor.run {
+                    isProcessingOCR = false
+                    
+                    if trades.isEmpty {
+                        // 如果没有识别到多笔交易，尝试单笔解析
+                        if let tradeData = parseTradeData(from: text) {
+                            fillForm(with: tradeData)
+                        } else {
+                            ocrError = "无法从图片中解析交易数据，请检查图片内容"
+                        }
+                    } else if trades.count == 1 {
+                        // 如果只有一笔，直接填充表单
+                        fillForm(with: trades[0])
+                    } else {
+                        // 多笔交易，显示批量确认界面
+                        recognizedTrades = trades
+                        showingBatchConfirm = true
                     }
                 }
             } catch {
@@ -557,6 +584,49 @@ struct NewTradeSheet: View {
             dismiss()
         } catch {
             print("保存交易失败: \(error)")
+        }
+    }
+    
+    private func saveBatchTrades(_ trades: [TradeData]) {
+        for tradeData in trades {
+            let trade = Trade(context: viewContext)
+            trade.id = UUID()
+            trade.symbol = tradeData.symbol.uppercased()
+            trade.side = tradeData.side
+            trade.openTime = tradeData.openTime ?? Date()
+            trade.closeTime = tradeData.closeTime ?? Date()
+            trade.openPrice = tradeData.openPrice
+            trade.closePrice = tradeData.closePrice
+            trade.leverage = Int16(tradeData.leverage)
+            trade.positionSize = tradeData.positionSize
+            
+            // 计算盈亏
+            let priceDiff = tradeData.closePrice - tradeData.openPrice
+            let multiplier = tradeData.side == "long" ? 1.0 : -1.0
+            let pnl = priceDiff * multiplier * tradeData.positionSize
+            trade.profitAmount = pnl
+            
+            // 计算盈亏率
+            let priceChangeRate = tradeData.openPrice > 0 ? 
+                (tradeData.closePrice - tradeData.openPrice) / tradeData.openPrice * multiplier : 0
+            trade.profitRate = priceChangeRate * Double(tradeData.leverage)
+            
+            if pnl > 0 {
+                trade.status = "win"
+            } else if pnl < 0 {
+                trade.status = "loss"
+            } else {
+                trade.status = "breakeven"
+            }
+            
+            trade.source = "ocr"
+        }
+        
+        do {
+            try viewContext.save()
+            dismiss()
+        } catch {
+            print("批量保存交易失败: \(error)")
         }
     }
 }
@@ -759,14 +829,105 @@ extension NewTradeSheet {
         }
     }
     
+    /// 从 OCR 文本中解析多笔交易数据
+    func parseMultipleTrades(from text: String) -> [TradeData] {
+        var trades: [TradeData] = []
+        let lines = text.components(separatedBy: .newlines).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        
+        // 策略1: 按交易对分割（每个USDT结尾的字符串可能是一笔交易）
+        let symbolPattern = #"([A-Z0-9]+USDT)"#
+        if let regex = try? NSRegularExpression(pattern: symbolPattern, options: .caseInsensitive) {
+            let nsString = text as NSString
+            let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsString.length))
+            
+            // 如果找到多个交易对，尝试为每个交易对解析数据
+            if matches.count > 1 {
+                for (index, match) in matches.enumerated() {
+                    guard let symbolRange = Range(match.range(at: 1), in: text) else { continue }
+                    let symbol = String(text[symbolRange])
+                    
+                    // 确定当前交易对的文本范围
+                    let startRange = match.range
+                    let endRange = index < matches.count - 1 ? matches[index + 1].range : NSRange(location: nsString.length, length: 0)
+                    
+                    let tradeTextRange = NSRange(location: startRange.location, length: endRange.location - startRange.location)
+                    if let tradeTextRange = Range(tradeTextRange, in: text) {
+                        let tradeText = String(text[tradeTextRange])
+                        
+                        if let tradeData = parseTradeData(from: tradeText, defaultSymbol: symbol) {
+                            trades.append(tradeData)
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 策略2: 如果策略1没找到多笔，尝试按行分割（每行可能是一笔交易）
+        if trades.isEmpty && lines.count > 3 {
+            // 尝试将文本按行分组，每组可能是一笔交易
+            var currentTradeLines: [String] = []
+            
+            for line in lines {
+                // 如果这一行包含交易对，可能是新交易的开始
+                if line.range(of: #"[A-Z0-9]+USDT"#, options: .regularExpression) != nil {
+                    if !currentTradeLines.isEmpty {
+                        let tradeText = currentTradeLines.joined(separator: "\n")
+                        if let tradeData = parseTradeData(from: tradeText) {
+                            trades.append(tradeData)
+                        }
+                    }
+                    currentTradeLines = [line]
+                } else {
+                    currentTradeLines.append(line)
+                }
+            }
+            
+            // 处理最后一组
+            if !currentTradeLines.isEmpty {
+                let tradeText = currentTradeLines.joined(separator: "\n")
+                if let tradeData = parseTradeData(from: tradeText) {
+                    trades.append(tradeData)
+                }
+            }
+        }
+        
+        // 策略3: 如果前两种策略都没找到，尝试按重复模式识别（例如每3-5行是一笔交易）
+        if trades.isEmpty && lines.count >= 6 {
+            // 假设每3-5行是一笔交易，尝试分组
+            let linesPerTrade = max(3, lines.count / 3) // 至少3行，最多分成3组
+            
+            for i in stride(from: 0, to: lines.count, by: linesPerTrade) {
+                let endIndex = min(i + linesPerTrade, lines.count)
+                let tradeLines = Array(lines[i..<endIndex])
+                let tradeText = tradeLines.joined(separator: "\n")
+                
+                if let tradeData = parseTradeData(from: tradeText) {
+                    trades.append(tradeData)
+                }
+            }
+        }
+        
+        // 过滤掉无效的交易（必须有交易对和价格）
+        let validTrades = trades.filter { !$0.symbol.isEmpty && $0.openPrice > 0 && $0.closePrice > 0 }
+        
+        // 如果识别到多笔有效交易，返回它们
+        if validTrades.count > 1 {
+            return validTrades
+        }
+        
+        return []
+    }
+    
     /// 从 OCR 文本中解析交易数据
-    func parseTradeData(from text: String) -> TradeData? {
+    func parseTradeData(from text: String, defaultSymbol: String? = nil) -> TradeData? {
         var tradeData = TradeData()
         let fullText = text.replacingOccurrences(of: "\n", with: " ")
         
         // 解析交易对
         if let symbol = extractSymbol(from: fullText) {
             tradeData.symbol = symbol
+        } else if let defaultSymbol = defaultSymbol {
+            tradeData.symbol = defaultSymbol
         }
         
         // 解析方向
@@ -921,6 +1082,214 @@ extension NewTradeSheet {
             }
         }
         return nil
+    }
+}
+
+struct BatchTradeConfirmSheet: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.dismiss) private var dismiss
+    
+    let trades: [TradeData]
+    let onConfirm: ([TradeData]) -> Void
+    let onCancel: () -> Void
+    
+    @State private var selectedTrades: Set<Int> = []
+    
+    private var isAllSelected: Bool {
+        !trades.isEmpty && selectedTrades.count == trades.count
+    }
+    
+    private var selectedCount: Int {
+        selectedTrades.count
+    }
+    
+    private func toggleSelectAll() {
+        if isAllSelected {
+            selectedTrades.removeAll()
+        } else {
+            selectedTrades = Set(0..<trades.count)
+        }
+    }
+    
+    private func toggleTrade(at index: Int) {
+        if selectedTrades.contains(index) {
+            selectedTrades.remove(index)
+        } else {
+            selectedTrades.insert(index)
+        }
+    }
+    
+    private func confirmImport() {
+        let selected = selectedTrades.sorted().compactMap { index -> TradeData? in
+            guard index < trades.count else { return nil }
+            return trades[index]
+        }
+        onConfirm(selected)
+    }
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                headerView
+                Divider()
+                tradeListView
+                Divider()
+                footerView
+            }
+            .frame(width: 700, height: 500)
+            .navigationTitle("批量导入交易")
+            .onAppear {
+                // 默认全选所有交易
+                selectedTrades = Set(0..<trades.count)
+            }
+        }
+    }
+    
+    private var headerView: some View {
+        HStack {
+            Text("识别到 \(trades.count) 笔交易")
+                .font(.headline)
+            Spacer()
+            Button(isAllSelected ? "取消全选" : "全选") {
+                toggleSelectAll()
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding()
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+    
+    private var tradeListView: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(0..<trades.count, id: \.self) { index in
+                    tradeRow(at: index)
+                    if index < trades.count - 1 {
+                        Divider()
+                    }
+                }
+            }
+        }
+    }
+    
+    private func tradeRow(at index: Int) -> some View {
+        HStack {
+            Button {
+                toggleTrade(at: index)
+            } label: {
+                Image(systemName: selectedTrades.contains(index) ? "checkmark.square.fill" : "square")
+                    .foregroundStyle(selectedTrades.contains(index) ? Color.accentColor : .secondary)
+            }
+            .buttonStyle(.plain)
+            
+            TradeDataRow(trade: trades[index], index: index)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(index % 2 == 0 ? Color.clear : Color(NSColor.controlBackgroundColor).opacity(0.3))
+    }
+    
+    private var footerView: some View {
+        HStack {
+            Text("已选择 \(selectedCount) 笔交易")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            
+            Spacer()
+            
+            Button("取消") {
+                onCancel()
+            }
+            .buttonStyle(.bordered)
+            
+            Button("确认导入") {
+                confirmImport()
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(selectedTrades.isEmpty)
+        }
+        .padding()
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+}
+
+struct TradeDataRow: View {
+    let trade: TradeData
+    let index: Int
+    
+    var body: some View {
+        HStack(spacing: 16) {
+            // 交易对和方向
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(trade.symbol.isEmpty ? "未知交易对" : trade.symbol)
+                        .font(.headline)
+                    Text(trade.side == "long" ? "做多" : "做空")
+                        .font(.caption)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(trade.side == "long" ? Color.green.opacity(0.2) : Color.red.opacity(0.2))
+                        .foregroundStyle(trade.side == "long" ? .green : .red)
+                        .cornerRadius(4)
+                }
+                
+                if let closeTime = trade.closeTime {
+                    Text(closeTime, style: .date)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            
+            Spacer()
+            
+            // 价格信息
+            VStack(alignment: .trailing, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text("开仓:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(String(format: "%.2f", trade.openPrice))
+                        .font(.caption)
+                        .monospacedDigit()
+                }
+                
+                HStack(spacing: 8) {
+                    Text("平仓:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(String(format: "%.2f", trade.closePrice))
+                        .font(.caption)
+                        .monospacedDigit()
+                }
+            }
+            
+            // 盈亏信息
+            VStack(alignment: .trailing, spacing: 4) {
+                let pnl = calculateProfit()
+                HStack(spacing: 4) {
+                    Text(String(format: "%.2f", pnl))
+                        .font(.headline)
+                        .monospacedDigit()
+                        .foregroundStyle(pnl >= 0 ? .green : .red)
+                    Text("USDT")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                
+                if trade.leverage > 0 {
+                    Text("\(trade.leverage)x")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 8)
+    }
+    
+    private func calculateProfit() -> Double {
+        let priceDiff = trade.closePrice - trade.openPrice
+        let multiplier = trade.side == "long" ? 1.0 : -1.0
+        return priceDiff * multiplier * trade.positionSize
     }
 }
 

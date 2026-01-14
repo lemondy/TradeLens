@@ -22,6 +22,15 @@ struct RootView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $selection) {
+                Section("分析") {
+                    NavigationLink(value: SidebarItem.capital) {
+                        Label("资金曲线", systemImage: "chart.line.uptrend.xyaxis")
+                    }
+                    NavigationLink(value: SidebarItem.aiReview) {
+                        Label("AI 智能复盘", systemImage: "brain.head.profile")
+                    }
+                }
+
                 Section("记录与复盘") {
                     NavigationLink(value: SidebarItem.tradeLog) {
                         Label("交易记录", systemImage: "list.bullet")
@@ -31,14 +40,6 @@ struct RootView: View {
                     }
                 }
                 
-                Section("分析") {
-                    NavigationLink(value: SidebarItem.capital) {
-                        Label("资金曲线", systemImage: "chart.line.uptrend.xyaxis")
-                    }
-                    NavigationLink(value: SidebarItem.aiReview) {
-                        Label("AI 智能复盘", systemImage: "brain.head.profile")
-                    }
-                }
                 
                 Section("配置") {
                     NavigationLink(value: SidebarItem.templates) {
