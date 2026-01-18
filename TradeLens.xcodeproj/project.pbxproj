@@ -22,6 +22,7 @@
 		AA0000000000000000000019 /* SecurityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001A /* SecurityService.swift */; };
 		AA000000000000000000001B /* TradeLens.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001C /* TradeLens.xcdatamodeld */; };
 		AA000000000000000000003B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003C /* Assets.xcassets */; };
+		AA000000000000000000003E /* tradelens.icns in Resources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003D /* tradelens.icns */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -42,6 +43,7 @@
 		AA000000000000000000001D /* TradeLens.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TradeLens.entitlements; sourceTree = "<group>"; };
 		AA000000000000000000001E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA000000000000000000003C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		AA000000000000000000003D /* tradelens.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = tradelens.icns; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -126,6 +128,7 @@
 				AA000000000000000000001D /* TradeLens.entitlements */,
 				AA000000000000000000001E /* Info.plist */,
 				AA000000000000000000003C /* Assets.xcassets */,
+				AA000000000000000000003D /* tradelens.icns */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -248,6 +251,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				AA000000000000000000003B /* Assets.xcassets in Resources */,
+				AA000000000000000000003E /* tradelens.icns in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

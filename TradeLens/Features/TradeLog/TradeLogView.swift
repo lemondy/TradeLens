@@ -337,13 +337,14 @@ struct NewTradeSheet: View {
     @State private var isProcessingOCR = false
     @State private var ocrError: String?
     @State private var showingImagePicker = false
+    @State private var showingCSVImporter = false
     @State private var recognizedTrades: [TradeData] = []
     @State private var showingBatchConfirm = false
     
     var body: some View {
         NavigationStack {
             Form {
-                Section("OCR 识别") {
+                Section("导入方式") {
                     Button {
                         recognizeFromClipboard()
                     } label: {
@@ -366,6 +367,17 @@ struct NewTradeSheet: View {
                         HStack {
                             Image(systemName: "photo")
                             Text("选择图片文件")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .disabled(isProcessingOCR)
+                    
+                    Button {
+                        showingCSVImporter = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "doc.text")
+                            Text("从 CSV 文件导入")
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -452,12 +464,41 @@ struct NewTradeSheet: View {
             ) { result in
                 switch result {
                 case .success(let urls):
-                    if let url = urls.first,
-                       let image = NSImage(contentsOf: url) {
-                        recognizeFromImage(image)
+                    if let url = urls.first {
+                        // 开始访问安全作用域资源
+                        let accessing = url.startAccessingSecurityScopedResource()
+                        defer {
+                            if accessing {
+                                url.stopAccessingSecurityScopedResource()
+                            }
+                        }
+                        if let image = NSImage(contentsOf: url) {
+                            recognizeFromImage(image)
+                        }
                     }
                 case .failure(let error):
                     ocrError = "选择文件失败: \(error.localizedDescription)"
+                }
+            }
+            .fileImporter(
+                isPresented: $showingCSVImporter,
+                allowedContentTypes: [.commaSeparatedText, .text],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first {
+                        // 开始访问安全作用域资源
+                        let accessing = url.startAccessingSecurityScopedResource()
+                        defer {
+                            if accessing {
+                                url.stopAccessingSecurityScopedResource()
+                            }
+                        }
+                        importFromCSV(url: url)
+                    }
+                case .failure(let error):
+                    ocrError = "选择 CSV 文件失败: \(error.localizedDescription)"
                 }
             }
         }
@@ -585,6 +626,224 @@ struct NewTradeSheet: View {
         } catch {
             print("保存交易失败: \(error)")
         }
+    }
+    
+    private func importFromCSV(url: URL) {
+        do {
+            let csvContent = try String(contentsOf: url, encoding: .utf8)
+            print("CSV 内容预览:\n\(csvContent.prefix(500))")
+            let trades = parseCSV(csvContent: csvContent)
+            print("解析到 \(trades.count) 笔交易")
+            
+            if trades.isEmpty {
+                ocrError = "CSV 文件中未找到有效的交易数据，请检查文件格式"
+            } else if trades.count == 1 {
+                fillForm(with: trades[0])
+            } else {
+                recognizedTrades = trades
+                showingBatchConfirm = true
+            }
+        } catch {
+            ocrError = "读取 CSV 文件失败: \(error.localizedDescription)"
+        }
+    }
+    
+    private func parseCSV(csvContent: String) -> [TradeData] {
+        var trades: [TradeData] = []
+        let lines = csvContent.components(separatedBy: .newlines).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        
+        guard lines.count > 1 else { return [] }
+        
+        // 解析表头
+        let headerLine = lines[0]
+        let headers = parseCSVLine(headerLine)
+        
+        // 清理表头（移除引号和空格）
+        let cleanedHeaders = headers.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\"", with: "").lowercased() }
+        print("表头: \(cleanedHeaders)")
+        
+        // 查找列索引（更灵活的匹配）
+        let symbolIndex = cleanedHeaders.firstIndex(where: { $0 == "symbol" })
+        let sideIndex = cleanedHeaders.firstIndex(where: { $0.contains("position side") || $0.contains("side") && !$0.contains("margin") })
+        let entryPriceIndex = cleanedHeaders.firstIndex(where: { $0.contains("entry price") || $0.contains("开仓价格") })
+        // 注意：处理拼写错误 "Pirce" -> "Price"
+        let closePriceIndex = cleanedHeaders.firstIndex(where: { 
+            $0.contains("close") && ($0.contains("price") || $0.contains("pirce")) || 
+            $0.contains("avg") && ($0.contains("close") || $0.contains("平仓价格"))
+        })
+        let volumeIndex = cleanedHeaders.firstIndex(where: { 
+            $0.contains("closed vol") || $0.contains("volume") || 
+            $0.contains("vol.") || $0.contains("仓位")
+        })
+        let pnlIndex = cleanedHeaders.firstIndex(where: { 
+            $0.contains("closing pnl") || $0.contains("pnl") || 
+            $0.contains("盈亏")
+        })
+        let openedIndex = cleanedHeaders.firstIndex(where: { 
+            $0 == "opened" || $0.contains("开仓时间")
+        })
+        let closedIndex = cleanedHeaders.firstIndex(where: { 
+            $0 == "closed" || $0.contains("平仓时间")
+        })
+        
+        print("列索引 - symbol: \(symbolIndex?.description ?? "nil"), entryPrice: \(entryPriceIndex?.description ?? "nil"), closePrice: \(closePriceIndex?.description ?? "nil")")
+        
+        guard let symbolIdx = symbolIndex,
+              let entryPriceIdx = entryPriceIndex,
+              let closePriceIdx = closePriceIndex else {
+            print("缺少必要的列: symbol=\(symbolIndex != nil), entryPrice=\(entryPriceIndex != nil), closePrice=\(closePriceIndex != nil)")
+            return []
+        }
+        
+        // 解析数据行
+        for i in 1..<lines.count {
+            let values = parseCSVLine(lines[i])
+            
+            guard values.count > max(symbolIdx, entryPriceIdx, closePriceIdx) else { continue }
+            
+            var trade = TradeData()
+            
+            // 交易对
+            trade.symbol = values[symbolIdx].trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\"", with: "")
+            
+            // 方向
+            if let sideIdx = sideIndex, sideIdx < values.count {
+                let sideValue = values[sideIdx].trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\"", with: "").lowercased()
+                trade.side = (sideValue == "long" || sideValue == "做多") ? "long" : "short"
+            }
+            
+            // 开仓价格
+            if let entryPrice = Double(values[entryPriceIdx].trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\"", with: "")) {
+                trade.openPrice = entryPrice
+            }
+            
+            // 平仓价格
+            if let closePrice = Double(values[closePriceIdx].trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\"", with: "")) {
+                trade.closePrice = closePrice
+            }
+            
+            // 仓位大小
+            if let volIdx = volumeIndex, volIdx < values.count,
+               let volume = Double(values[volIdx].trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\"", with: "")) {
+                trade.positionSize = volume
+            }
+            
+            // 盈亏金额
+            if let pnlIdx = pnlIndex, pnlIdx < values.count,
+               let pnl = Double(values[pnlIdx].trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\"", with: "")) {
+                trade.profitAmount = pnl
+            }
+            
+            // 开仓时间
+            if let openedIdx = openedIndex, openedIdx < values.count {
+                let dateString = values[openedIdx].trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\"", with: "")
+                trade.openTime = parseCSVDate(dateString)
+            }
+            
+            // 平仓时间
+            if let closedIdx = closedIndex, closedIdx < values.count {
+                let dateString = values[closedIdx].trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\"", with: "")
+                trade.closeTime = parseCSVDate(dateString)
+            }
+            
+            // 默认杠杆
+            trade.leverage = 10
+            
+            // 验证必要字段
+            if !trade.symbol.isEmpty && trade.openPrice > 0 && trade.closePrice > 0 {
+                // 如果仓位大小为0但盈亏金额不为0，尝试从盈亏金额反推仓位大小
+                if trade.positionSize == 0 && trade.profitAmount != 0 {
+                    let priceDiff = abs(trade.closePrice - trade.openPrice)
+                    if priceDiff > 0 {
+                        trade.positionSize = abs(trade.profitAmount) / priceDiff
+                    }
+                }
+                
+                // 如果开仓时间为空，使用平仓时间
+                if trade.openTime == nil {
+                    trade.openTime = trade.closeTime
+                }
+                
+                // 如果平仓时间为空，使用开仓时间
+                if trade.closeTime == nil {
+                    trade.closeTime = trade.openTime ?? Date()
+                }
+                
+                trades.append(trade)
+                print("成功解析交易: \(trade.symbol), 开仓: \(trade.openPrice), 平仓: \(trade.closePrice)")
+            } else {
+                print("跳过无效交易: symbol=\(trade.symbol), openPrice=\(trade.openPrice), closePrice=\(trade.closePrice)")
+            }
+        }
+        
+        print("总共解析到 \(trades.count) 笔有效交易")
+        return trades
+    }
+    
+    private func parseCSVLine(_ line: String) -> [String] {
+        var fields: [String] = []
+        var currentField = ""
+        var insideQuotes = false
+        var previousChar: Character? = nil
+        
+        for char in line {
+            if char == "\"" {
+                // 处理转义的引号 ""
+                if previousChar == "\"" && insideQuotes {
+                    currentField.append("\"")
+                    previousChar = nil
+                    continue
+                }
+                insideQuotes.toggle()
+            } else if char == "," && !insideQuotes {
+                fields.append(currentField)
+                currentField = ""
+            } else {
+                currentField.append(char)
+            }
+            previousChar = char
+        }
+        // 添加最后一个字段
+        fields.append(currentField)
+        
+        return fields
+    }
+    
+    private func parseCSVDate(_ dateString: String) -> Date? {
+        let cleanedDateString = dateString.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\"", with: "")
+        
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.timeZone = TimeZone.current
+        
+        // 尝试多种日期格式（按常见程度排序）
+        let formats = [
+            "yyyy-MM-dd HH:mm:ss.SSS",  // 2025-12-11 11:10:33.737
+            "yyyy-MM-dd HH:mm:ss",      // 2025-12-11 11:10:33
+            "yyyy/MM/dd HH:mm:ss",      // 2025/12/11 11:10:33
+            "MM/dd/yyyy HH:mm:ss",      // 12/11/2025 11:10:33
+            "yyyy-MM-dd",               // 2025-12-11
+            "yyyy/MM/dd",                // 2025/12/11
+            "MM/dd/yyyy"                // 12/11/2025
+        ]
+        
+        for format in formats {
+            dateFormatter.dateFormat = format
+            if let date = dateFormatter.date(from: cleanedDateString) {
+                return date
+            }
+        }
+        
+        // 如果所有格式都失败，尝试使用 ISO8601DateFormatter
+        if #available(macOS 10.12, *) {
+            let isoFormatter = ISO8601DateFormatter()
+            isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = isoFormatter.date(from: cleanedDateString) {
+                return date
+            }
+        }
+        
+        return nil
     }
     
     private func saveBatchTrades(_ trades: [TradeData]) {

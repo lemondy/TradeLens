@@ -24,6 +24,8 @@
 	<string>Copyright © 2025 TradeLens. All rights reserved.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>CFBundleIconFile</key>
+	<string>tradelens</string>
 </dict>
 </plist>
 
