@@ -24,6 +24,7 @@ struct TradeLogView: View {
     @State private var filterSymbol: String = ""
     @State private var filterStatus: String = "全部"
     @State private var sortBy: SortOption = .time
+    @State private var tableSortOrder: [KeyPathComparator<Trade>] = []
     
     enum SortOption: String, CaseIterable {
         case time = "时间"
@@ -42,13 +43,19 @@ struct TradeLogView: View {
             result = result.filter { ($0.status ?? "") == filterStatus }
         }
         
-        switch sortBy {
-        case .time:
-            result.sort { ($0.closeTime ?? Date.distantPast) > ($1.closeTime ?? Date.distantPast) }
-        case .profit:
-            result.sort { $0.profitAmount > $1.profitAmount }
-        case .symbol:
-            result.sort { ($0.symbol ?? "") < ($1.symbol ?? "") }
+        // 使用表格排序（如果设置了）
+        if !tableSortOrder.isEmpty {
+            result.sort(using: tableSortOrder)
+        } else {
+            // 否则使用顶部工具栏的排序
+            switch sortBy {
+            case .time:
+                result.sort { ($0.closeTime ?? Date.distantPast) > ($1.closeTime ?? Date.distantPast) }
+            case .profit:
+                result.sort { $0.profitAmount > $1.profitAmount }
+            case .symbol:
+                result.sort { ($0.symbol ?? "") < ($1.symbol ?? "") }
+            }
         }
         
         return result
@@ -65,156 +72,11 @@ struct TradeLogView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 工具栏
-            HStack {
-                Text("交易记录")
-                    .font(.title2)
-                    .bold()
-                
-                Spacer()
-                
-                // 筛选和排序
-                HStack(spacing: 12) {
-                    TextField("搜索交易对", text: $filterSymbol)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 150)
-                    
-                    Picker("状态", selection: $filterStatus) {
-                        Text("全部").tag("全部")
-                        Text("盈利").tag("win")
-                        Text("亏损").tag("loss")
-                        Text("保本").tag("breakeven")
-                    }
-                    .pickerStyle(.menu)
-                    .frame(width: 100)
-                    
-                    Picker("排序", selection: $sortBy) {
-                        ForEach(SortOption.allCases, id: \.self) { option in
-                            Text(option.rawValue).tag(option)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .frame(width: 100)
-                }
-                
-                Button {
-                    showingNewTradeSheet = true
-                } label: {
-                    Label("新建交易", systemImage: "plus")
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            .padding()
-            
+            toolbarView
             Divider()
-            
-            // 统计信息栏
-            HStack(spacing: 24) {
-                StatItem(title: "总交易数", value: "\(filteredTrades.count)")
-                StatItem(title: "总盈亏", value: String(format: "%.2f USDT", totalProfit), color: totalProfit >= 0 ? .green : .red)
-                StatItem(title: "胜率", value: String(format: "%.1f%%", winRate * 100))
-                Spacer()
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-            .background(Color(NSColor.controlBackgroundColor))
-            
+            statsView
             Divider()
-            
-            // 交易列表
-            if filteredTrades.isEmpty {
-                ContentUnavailableView(
-                    "暂无交易记录",
-                    systemImage: "list.bullet",
-                    description: Text("点击右上角「新建交易」按钮开始记录您的第一笔交易")
-                )
-            } else {
-                Table(filteredTrades, selection: $selectedTradeID) {
-                    TableColumn("时间") { trade in
-                        Text(trade.closeTime ?? Date(), style: .date)
-                            .font(.system(size: 12))
-                    }
-                    .width(min: 120, ideal: 150)
-                    
-                    TableColumn("交易对") { trade in
-                        Text(trade.symbol ?? "-")
-                            .font(.system(size: 13, design: .monospaced))
-                    }
-                    .width(min: 100, ideal: 120)
-                    
-                    TableColumn("方向") { trade in
-                        HStack {
-                            Image(systemName: trade.side == "long" ? "arrow.up" : "arrow.down")
-                                .foregroundStyle(trade.side == "long" ? .green : .red)
-                            Text(trade.side == "long" ? "做多" : "做空")
-                        }
-                        .font(.system(size: 12))
-                    }
-                    .width(min: 80, ideal: 100)
-                    
-                    TableColumn("开仓价格") { trade in
-                        Text(String(format: "%.2f", trade.openPrice))
-                            .font(.system(size: 12, design: .monospaced))
-                    }
-                    .width(min: 100, ideal: 120)
-                    
-                    TableColumn("平仓价格") { trade in
-                        Text(String(format: "%.2f", trade.closePrice))
-                            .font(.system(size: 12, design: .monospaced))
-                    }
-                    .width(min: 100, ideal: 120)
-                    
-                    TableColumn("杠杆") { trade in
-                        Text("\(trade.leverage)x")
-                            .font(.system(size: 12))
-                    }
-                    .width(min: 60, ideal: 80)
-                    
-                    TableColumn("盈亏金额") { trade in
-                        Text(String(format: "%.2f", trade.profitAmount))
-                            .foregroundStyle(trade.profitAmount >= 0 ? .green : .red)
-                            .font(.system(size: 12, design: .monospaced))
-                    }
-                    .width(min: 100, ideal: 120)
-                    
-                    TableColumn("盈亏率") { trade in
-                        Text(String(format: "%.2f%%", trade.profitRate * 100))
-                            .foregroundStyle(trade.profitRate >= 0 ? .green : .red)
-                            .font(.system(size: 12))
-                    }
-                    .width(min: 80, ideal: 100)
-                    
-                    TableColumn("状态") { trade in
-                        StatusBadge(status: trade.status ?? "")
-                    }
-                    .width(min: 80, ideal: 100)
-                    
-                    TableColumn("复盘状态") { trade in
-                        ReviewStatusBadge(hasReview: trade.review != nil)
-                    }
-                    .width(min: 90, ideal: 100)
-                }
-                .tableStyle(.inset)
-                .contextMenu {
-                    if let tradeID = selectedTradeID,
-                       let trade = filteredTrades.first(where: { $0.id == tradeID }) {
-                        Button {
-                            tradeToEdit = trade
-                        } label: {
-                            Label("编辑", systemImage: "pencil")
-                        }
-                        
-                        Button(role: .destructive) {
-                            deleteTrade(trade)
-                        } label: {
-                            Label("删除", systemImage: "trash")
-                        }
-                    } else {
-                        Text("请先选择一条交易记录")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
+            tradesTableView
         }
         .sheet(isPresented: $showingNewTradeSheet) {
             NewTradeSheet()
@@ -226,6 +88,166 @@ struct TradeLogView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .newTradeShortcut)) { _ in
             showingNewTradeSheet = true
+        }
+    }
+    
+    private var toolbarView: some View {
+        HStack {
+            Text("交易记录")
+                .font(.title2)
+                .bold()
+            
+            Spacer()
+            
+            // 筛选和排序
+            HStack(spacing: 12) {
+                TextField("搜索交易对", text: $filterSymbol)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 150)
+                
+                Picker("状态", selection: $filterStatus) {
+                    Text("全部").tag("全部")
+                    Text("盈利").tag("win")
+                    Text("亏损").tag("loss")
+                    Text("保本").tag("breakeven")
+                }
+                .pickerStyle(.menu)
+                .frame(width: 100)
+                
+                Picker("排序", selection: $sortBy) {
+                    ForEach(SortOption.allCases, id: \.self) { option in
+                        Text(option.rawValue).tag(option)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(width: 100)
+            }
+            
+            Button {
+                showingNewTradeSheet = true
+            } label: {
+                Label("新建交易", systemImage: "plus")
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding()
+    }
+    
+    private var statsView: some View {
+        HStack(spacing: 24) {
+            StatItem(title: "总交易数", value: "\(filteredTrades.count)")
+            StatItem(title: "总盈亏", value: String(format: "%.2f USDT", totalProfit), color: totalProfit >= 0 ? .green : .red)
+            StatItem(title: "胜率", value: String(format: "%.1f%%", winRate * 100))
+            Spacer()
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+    
+    @ViewBuilder
+    private var tradesTableView: some View {
+        if filteredTrades.isEmpty {
+            ContentUnavailableView(
+                "暂无交易记录",
+                systemImage: "list.bullet",
+                description: Text("点击右上角「新建交易」按钮开始记录您的第一笔交易")
+            )
+        } else {
+            tradeTable
+        }
+    }
+    
+    private var tradeTable: some View {
+        Table(filteredTrades, selection: $selectedTradeID, sortOrder: $tableSortOrder) {
+            TableColumn("时间", value: \.sortableCloseTime) { trade in
+                Text(trade.closeTime ?? Date(), style: .date)
+                    .font(.system(size: 12))
+            }
+            .width(min: 120, ideal: 150)
+            
+            TableColumn("交易对", value: \.sortableSymbol) { trade in
+                Text(trade.symbol ?? "-")
+                    .font(.system(size: 13, design: .monospaced))
+            }
+            .width(min: 100, ideal: 120)
+            
+            TableColumn("方向", value: \.sortableSide) { trade in
+                HStack {
+                    Image(systemName: trade.side == "long" ? "arrow.up" : "arrow.down")
+                        .foregroundStyle(trade.side == "long" ? .green : .red)
+                    Text(trade.side == "long" ? "做多" : "做空")
+                }
+                .font(.system(size: 12))
+            }
+            .width(min: 80, ideal: 100)
+            
+            TableColumn("开仓价格", value: \.openPrice) { trade in
+                Text(String(format: "%.2f", trade.openPrice))
+                    .font(.system(size: 12, design: .monospaced))
+            }
+            .width(min: 100, ideal: 120)
+            
+            TableColumn("平仓价格", value: \.closePrice) { trade in
+                Text(String(format: "%.2f", trade.closePrice))
+                    .font(.system(size: 12, design: .monospaced))
+            }
+            .width(min: 100, ideal: 120)
+            
+            TableColumn("杠杆", value: \.sortableLeverage) { trade in
+                Text("\(trade.leverage)x")
+                    .font(.system(size: 12))
+            }
+            .width(min: 60, ideal: 80)
+            
+            TableColumn("盈亏金额", value: \.profitAmount) { trade in
+                Text(String(format: "%.2f", trade.profitAmount))
+                    .foregroundStyle(trade.profitAmount >= 0 ? .green : .red)
+                    .font(.system(size: 12, design: .monospaced))
+            }
+            .width(min: 100, ideal: 120)
+            
+            TableColumn("盈亏率", value: \.profitRate) { trade in
+                Text(String(format: "%.2f%%", trade.profitRate * 100))
+                    .foregroundStyle(trade.profitRate >= 0 ? .green : .red)
+                    .font(.system(size: 12))
+            }
+            .width(min: 80, ideal: 100)
+            
+            TableColumn("状态", value: \.sortableStatus) { trade in
+                StatusBadge(status: trade.status ?? "")
+            }
+            .width(min: 80, ideal: 100)
+            
+            TableColumn("复盘状态") { trade in
+                ReviewStatusBadge(hasReview: trade.review != nil)
+            }
+            .width(min: 90, ideal: 100)
+        }
+        .tableStyle(.inset)
+        .contextMenu {
+            tradeContextMenu
+        }
+    }
+    
+    @ViewBuilder
+    private var tradeContextMenu: some View {
+        if let tradeID = selectedTradeID,
+           let trade = filteredTrades.first(where: { $0.id == tradeID }) {
+            Button {
+                tradeToEdit = trade
+            } label: {
+                Label("编辑", systemImage: "pencil")
+            }
+            
+            Button(role: .destructive) {
+                deleteTrade(trade)
+            } label: {
+                Label("删除", systemImage: "trash")
+            }
+        } else {
+            Text("请先选择一条交易记录")
+                .foregroundStyle(.secondary)
         }
     }
     
@@ -1549,6 +1571,29 @@ struct TradeDataRow: View {
         let priceDiff = trade.closePrice - trade.openPrice
         let multiplier = trade.side == "long" ? 1.0 : -1.0
         return priceDiff * multiplier * trade.positionSize
+    }
+}
+
+// MARK: - Trade Extension for Sorting
+extension Trade {
+    var sortableCloseTime: Date {
+        closeTime ?? Date.distantPast
+    }
+    
+    var sortableSymbol: String {
+        symbol ?? ""
+    }
+    
+    var sortableSide: String {
+        side ?? ""
+    }
+    
+    var sortableLeverage: Int {
+        Int(leverage)
+    }
+    
+    var sortableStatus: String {
+        status ?? ""
     }
 }
 
